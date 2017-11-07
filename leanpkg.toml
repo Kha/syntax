@@ -1,0 +1,8 @@
+[package]
+name = "syntax"
+version = "0.1"
+lean_version = "master"
+
+[dependencies]
+mathlib = {git = "https://github.com/leanprover/mathlib", rev = "4ae6a578bca0fa007cda0859b4559afd607ac45e"}
+smt2_interface = {git = "https://github.com/leanprover/smt2_interface", rev = "8225227641ac3033bc82e939dc66edb1ae4fb720"}
