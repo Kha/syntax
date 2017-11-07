@@ -15,16 +15,28 @@ error "unreachable"
 @[reducible] def syntax_id := ℕ
 @[reducible] def macro_scope_id := ℕ
 
+-- byte offset into source string
+@[reducible] def position := ℕ
+
+structure span :=
+(left : position)
+(right : position)
+(file : string)
+
 inductive syntax
-| macro (id : syntax_id) (m : name) (args : list syntax)
 | name (id : syntax_id) (n : name) (msc : option macro_scope_id)
--- ...
+-- any non-name atom
+| atom (s : string)
+| list (ls : list syntax)
+| node (id : syntax_id) (sp : span) (m : name) (args : list syntax)
 
 protected meta def syntax.to_format : syntax → format :=
 λ s, format.group $ format.nest 2 $ match s with
-| (syntax.name id n none) := format!"({id}: name `{n})"
-| (syntax.name id n (some sc)) := format!"({id}: name `{n} from {sc})"
-| (syntax.macro id m args) :=
+| (syntax.name id n none) := format!"(name `{n})"
+| (syntax.name id n (some sc)) := format!"(name `{n} from {sc})"
+| (syntax.atom s) := format!"(atom {s})"
+| (syntax.list ls) := format!"[{format.join $ ls.map syntax.to_format}]"
+| (syntax.node id _ m args) :=
     let args := format.join $ args.map (λ arg, format!"\n{arg.to_format}") in
     format!"({id}: node `{m} {args})"
 end
@@ -63,17 +75,21 @@ section
 parameter (macros : name → option macro)
 
 def flip_tag (tag : ℕ) : syntax → syntax
-| (syntax.macro id m args) := syntax.macro id m (args.map
+| (syntax.node id sp m args) := syntax.node id sp m (args.map
+    -- flip_tag
+    (λ s, flip_tag s))
+| (syntax.list ls) := syntax.list (ls.map
     -- flip_tag
     (λ s, flip_tag s))
 | (syntax.name id n none) := syntax.name id n (some tag)
 | (syntax.name id n (some tag')) := syntax.name id n (if tag = tag' then none else some tag')
+| stx := stx
 using_well_founded { dec_tac := tactic.admit } -- TODO
 
 def expand : ℕ → syntax → exp_m syntax
-| (fuel + 1) (syntax.macro id m args) :=
+| (fuel + 1) (syntax.node id sp m args) :=
 do some (macro.mk _ (some expander) _) ← pure $ macros m
-     | syntax.macro id m <$> args.mmap (expand fuel),
+     | syntax.node id sp m <$> args.mmap (expand fuel),
    tag ← mk_tag,
    let args := args.map $ flip_tag tag,
    -- expand recursively
@@ -81,7 +97,7 @@ do some (macro.mk _ (some expander) _) ← pure $ macros m
 | _ stx := pure stx
 
 def resolve : scope → syntax → resolve_m unit
-| sc (syntax.macro id m args) :=
+| sc (syntax.node id sp m args) :=
 do some (macro.mk _ _ (some resolver)) ← pure $ macros m
      | args.mmap' $ resolve sc,
    arg_scopes ← resolver sc id args,
@@ -93,9 +109,10 @@ end
 
 --
 
+def sp := span.mk 0 0 "foo"
 def lambda_macro := {macro .
   name := "lambda",
-  resolve := some $ λ sc id args,
+  resolve := some $ λ sc _ args,
   do [syntax.name id n msc, body] ← pure args
        -- TODO: add `monad_error` class to remove lift (also, `monad_lift` seems to be broken)
        | state_t.lift unreachable,
@@ -103,7 +120,7 @@ def lambda_macro := {macro .
 
 def ident_macro := {macro .
   name := "ident",
-  resolve := some $ λ sc id args,
+  resolve := some $ λ sc _ args,
   do [syntax.name id n msc] ← pure args
        | state_t.lift unreachable,
      some ref ← pure $ sc.find (n, msc)
@@ -115,7 +132,7 @@ def intro_x_macro := {macro .
   name := "intro_x",
   expand := some $ λ args,
     -- TODO: how to manage IDs?
-    syntax.macro 5 "lambda" (syntax.name 6 "x" none :: args)}
+    syntax.node 5 sp "lambda" (syntax.name 6 "x" none :: args)}
 
 def macros : name → option macro
 | "lambda" := some lambda_macro
@@ -138,17 +155,17 @@ match resolve' (expand' stx) with
 | except.ok    o := tactic.trace stx >> tactic.trace o
 end
 
-run_cmd test $ syntax.macro 0 "lambda" [
+run_cmd test $ syntax.node 0 sp "lambda" [
   syntax.name 1 "x" none,
-  syntax.macro 2 "ident" [
+  syntax.node 2 sp "ident" [
     syntax.name 3 "x" none
   ]
 ]
 
-run_cmd test $ syntax.macro 0 "lambda" [
+run_cmd test $ syntax.node 0 sp "lambda" [
   syntax.name 1 "x" none,
-  syntax.macro 4 "intro_x" [
-    syntax.macro 2 "ident" [
+  syntax.node 4 sp "intro_x" [
+    syntax.node 2 sp "ident" [
       syntax.name 3 "x" none
     ]
   ]
@@ -158,7 +175,9 @@ run_cmd test $ syntax.macro 0 "lambda" [
 
 def syntax.rename (σ : syntax_id → name) : syntax → syntax
 | (syntax.name id n msc) := syntax.name id (σ id) msc
-| (syntax.macro id m args) := syntax.macro id m (args.map (λ a, syntax.rename a))
+| (syntax.node id sp m args) := syntax.node id sp m (args.map (λ a, syntax.rename a))
+| (syntax.list ls) := syntax.list (ls.map (λ a, syntax.rename a))
+| (syntax.atom s) := syntax.atom s
 using_well_founded { dec_tac := tactic.admit }
 
 def α_conv (rsm : resolve_map) (s₁ s₂ : syntax) :=
