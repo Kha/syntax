@@ -45,7 +45,15 @@ meta instance : has_to_format syntax := ⟨syntax.to_format⟩
 meta instance : has_to_string syntax := ⟨to_string ∘ to_fmt⟩
 meta instance : has_repr syntax := ⟨to_string ∘ to_fmt⟩
 
-@[reducible] def resolve_map := hash_map syntax_id (λ _, syntax_id)
+structure resolved :=
+(decl : syntax_id)
+/- prefix of the reference that corresponds to the decl. All trailing name components
+   are field accesses. -/
+(«prefix» : name)
+
+meta instance : has_to_format resolved := ⟨λ r, to_fmt (r.decl, r.prefix)⟩
+
+@[reducible] def resolve_map := hash_map syntax_id (λ _, resolved)
 def scope := hash_map (name × option macro_scope_id) (λ _, syntax_id)
 
 @[reducible] def resolve_m := state_t resolve_map (except string)
@@ -119,14 +127,22 @@ def lambda_macro := {macro .
        | state_t.lift unreachable,
      pure [sc, sc.insert (n, msc) id]}
 
+def resolve_name (msc : option macro_scope_id) (sc : scope) : name → option resolved
+| (name.mk_string s n) :=
+do {
+  decl ← sc.find (n.mk_string s, msc),
+  pure ⟨decl, n.mk_string s⟩
+} <|> resolve_name n
+| _ := none
+
 def ref_macro := {macro .
   name := "ref",
   resolve := some $ λ sc _ args,
   do [syntax.ident id _ n msc] ← pure args
        | state_t.lift unreachable,
-     some ref ← pure $ sc.find (n, msc)
+     some resolved ← pure $ resolve_name msc sc n
        | state_t.lift $ error sformat!"unknown identifier {n}",
-     state_t.modify (λ h, hash_map.insert h id ref),
+     state_t.modify (λ h, hash_map.insert h id resolved),
      pure []}
 
 def intro_x_macro := {macro .
@@ -163,6 +179,7 @@ run_cmd test $ syntax.node 0 sp "lambda" [
   ]
 ]
 
+-- test macro shadowing
 run_cmd test $ syntax.node 0 sp "lambda" [
   syntax.ident 1 sp "x" none,
   syntax.node 4 sp "intro_x" [
@@ -172,20 +189,51 @@ run_cmd test $ syntax.node 0 sp "lambda" [
   ]
 ]
 
+-- test field notation
+run_cmd test $ syntax.node 0 sp "lambda" [
+  syntax.ident 1 sp `x.y none,
+  syntax.node 2 sp "ref" [
+    syntax.ident 3 sp `x.y.z none
+  ]
+]
+
 --
 
-def syntax.rename (σ : syntax_id → name) : syntax → syntax
-| (syntax.ident id sp n msc) := syntax.ident id none (σ id) msc
-| (syntax.node id sp m args) := syntax.node id sp m (args.map (λ a, syntax.rename a))
-| (syntax.list ls) := syntax.list (ls.map (λ a, syntax.rename a))
+namespace name
+-- TODO: make original non-meta by making decidable_eq instance non-meta
+def replace_prefix' : name → name → name → name
+| anonymous        p p' := anonymous
+| (mk_string s c)  p p' := if c = p then mk_string s p' else mk_string s (replace_prefix' c p p')
+| (mk_numeral v c) p p' := if c = p then mk_numeral v p' else mk_numeral v (replace_prefix' c p p')
+end name
+
+def α_conv (rsm : resolve_map) (σ : syntax_id → name) : syntax → syntax
+| (syntax.ident id sp n msc) := match rsm.find id with
+  | some r := syntax.ident id none (n.replace_prefix' r.prefix (σ r.decl)) msc
+  | none   := syntax.ident id none (σ id) msc
+  end
+| (syntax.node id sp m args) := syntax.node id sp m (args.map (λ a, α_conv a))
+| (syntax.list ls) := syntax.list (ls.map (λ a, α_conv a))
 | (syntax.atom id sp s) := syntax.atom id sp s
 using_well_founded { dec_tac := tactic.admit }
 
-def α_conv (rsm : resolve_map) (s₁ s₂ : syntax) :=
-∃ σ, s₁.rename (σ ∘ λ id, (rsm.find id).get_or_else id) = s₂
+run_cmd
+let stx := syntax.node 0 sp "lambda" [
+  syntax.ident 1 sp `x.y none,
+  syntax.node 2 sp "ref" [
+    syntax.ident 3 sp `x.y.z none
+  ]
+] in
+match resolve' (expand' stx) with
+| except.ok (_, rsm) := tactic.trace (α_conv rsm (λ id, if id = 1 then `a else `b) stx)
+| except.error _ := tactic.skip
+end
+
+def α_equiv (rsm : resolve_map) (s₁ s₂ : syntax) :=
+∃ σ, α_conv rsm σ s₁ = s₂
 
 theorem hygienic (s₁ s₂ : syntax) :
 match resolve' (expand' s₁) : _ → Prop with
-| except.ok (_, rsm) := α_conv rsm s₁ s₂ → α_conv rsm (expand' s₁) (expand' s₂)
+| except.ok (_, rsm) := α_equiv rsm s₁ s₂ → α_equiv rsm (expand' s₁) (expand' s₂)
 | except.error _ := false
 end := sorry
