@@ -24,17 +24,17 @@ structure span :=
 (file : string)
 
 inductive syntax
-| name (id : syntax_id) (n : name) (msc : option macro_scope_id)
--- any non-name atom
-| atom (s : string)
+| ident (id : syntax_id) (sp : option span) (n : name) (msc : option macro_scope_id)
+/- any non-ident atom -/
+| atom (id : syntax_id) (sp : option span) (val : name)
 | list (ls : list syntax)
-| node (id : syntax_id) (sp : span) (m : name) (args : list syntax)
+| node (id : syntax_id) (sp : option span) (m : name) (args : list syntax)
 
 protected meta def syntax.to_format : syntax → format :=
 λ s, format.group $ format.nest 2 $ match s with
-| (syntax.name id n none) := format!"(name `{n})"
-| (syntax.name id n (some sc)) := format!"(name `{n} from {sc})"
-| (syntax.atom s) := format!"(atom {s})"
+| (syntax.ident id _ n none) := format!"({id}: ident `{n})"
+| (syntax.ident id _ n (some sc)) := format!"({id}: ident `{n} from {sc})"
+| (syntax.atom id _ val) := format!"(atom {val})"
 | (syntax.list ls) := format!"[{format.join $ ls.map syntax.to_format}]"
 | (syntax.node id _ m args) :=
     let args := format.join $ args.map (λ arg, format!"\n{arg.to_format}") in
@@ -81,8 +81,8 @@ def flip_tag (tag : ℕ) : syntax → syntax
 | (syntax.list ls) := syntax.list (ls.map
     -- flip_tag
     (λ s, flip_tag s))
-| (syntax.name id n none) := syntax.name id n (some tag)
-| (syntax.name id n (some tag')) := syntax.name id n (if tag = tag' then none else some tag')
+| (syntax.ident id sp n none) := syntax.ident id sp n (some tag)
+| (syntax.ident id sp n (some tag')) := syntax.ident id sp n (if tag = tag' then none else some tag')
 | stx := stx
 using_well_founded { dec_tac := tactic.admit } -- TODO
 
@@ -109,19 +109,20 @@ end
 
 --
 
-def sp := span.mk 0 0 "foo"
+def sp : option span := none
+
 def lambda_macro := {macro .
   name := "lambda",
   resolve := some $ λ sc _ args,
-  do [syntax.name id n msc, body] ← pure args
+  do [syntax.ident id sp n msc, body] ← pure args
        -- TODO: add `monad_error` class to remove lift (also, `monad_lift` seems to be broken)
        | state_t.lift unreachable,
      pure [sc, sc.insert (n, msc) id]}
 
-def ident_macro := {macro .
-  name := "ident",
+def ref_macro := {macro .
+  name := "ref",
   resolve := some $ λ sc _ args,
-  do [syntax.name id n msc] ← pure args
+  do [syntax.ident id _ n msc] ← pure args
        | state_t.lift unreachable,
      some ref ← pure $ sc.find (n, msc)
        | state_t.lift $ error sformat!"unknown identifier {n}",
@@ -132,11 +133,11 @@ def intro_x_macro := {macro .
   name := "intro_x",
   expand := some $ λ args,
     -- TODO: how to manage IDs?
-    syntax.node 5 sp "lambda" (syntax.name 6 "x" none :: args)}
+    syntax.node 5 sp "lambda" (syntax.ident 6 sp "x" none :: args)}
 
 def macros : name → option macro
 | "lambda" := some lambda_macro
-| "ident" := some ident_macro
+| "ref" := some ref_macro
 | "intro_x" := some intro_x_macro
 | _ := none
 
@@ -156,17 +157,17 @@ match resolve' (expand' stx) with
 end
 
 run_cmd test $ syntax.node 0 sp "lambda" [
-  syntax.name 1 "x" none,
-  syntax.node 2 sp "ident" [
-    syntax.name 3 "x" none
+  syntax.ident 1 sp "x" none,
+  syntax.node 2 sp "ref" [
+    syntax.ident 3 sp "x" none
   ]
 ]
 
 run_cmd test $ syntax.node 0 sp "lambda" [
-  syntax.name 1 "x" none,
+  syntax.ident 1 sp "x" none,
   syntax.node 4 sp "intro_x" [
-    syntax.node 2 sp "ident" [
-      syntax.name 3 "x" none
+    syntax.node 2 sp "ref" [
+      syntax.ident 3 sp "x" none
     ]
   ]
 ]
@@ -174,10 +175,10 @@ run_cmd test $ syntax.node 0 sp "lambda" [
 --
 
 def syntax.rename (σ : syntax_id → name) : syntax → syntax
-| (syntax.name id n msc) := syntax.name id (σ id) msc
+| (syntax.ident id sp n msc) := syntax.ident id none (σ id) msc
 | (syntax.node id sp m args) := syntax.node id sp m (args.map (λ a, syntax.rename a))
 | (syntax.list ls) := syntax.list (ls.map (λ a, syntax.rename a))
-| (syntax.atom s) := syntax.atom s
+| (syntax.atom id sp s) := syntax.atom id sp s
 using_well_founded { dec_tac := tactic.admit }
 
 def α_conv (rsm : resolve_map) (s₁ s₂ : syntax) :=
