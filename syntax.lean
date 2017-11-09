@@ -10,7 +10,7 @@ open state
 def unreachable {α : Type} : except string α :=
 error "unreachable"
 
---
+-- syntax
 
 @[reducible] def syntax_id := ℕ
 @[reducible] def macro_scope_id := ℕ
@@ -115,7 +115,7 @@ do some (macro.mk _ _ (some resolver)) ← pure $ macros m
 using_well_founded { dec_tac := tactic.admit }
 end
 
---
+-- some examples
 
 def sp : option span := none
 
@@ -197,7 +197,7 @@ run_cmd test $ syntax.node 0 sp "lambda" [
   ]
 ]
 
---
+-- hygiene
 
 namespace name
 -- TODO: make original non-meta by making decidable_eq instance non-meta
