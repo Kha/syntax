@@ -23,22 +23,31 @@ structure span :=
 (right : position)
 (file : string)
 
+structure syntax_ident :=
+(id : syntax_id) (sp : option span) (name : name) (msc : option macro_scope_id)
+
+structure syntax_atom :=
+(id : syntax_id) (sp : option span) (val : name)
+
+structure syntax_node (syntax : Type) :=
+(id : syntax_id) (sp : option span) (m : name) (args : list syntax)
+
 inductive syntax
-| ident (id : syntax_id) (sp : option span) (n : name) (msc : option macro_scope_id)
+| ident (val : syntax_ident)
 /- any non-ident atom -/
-| atom (id : syntax_id) (sp : option span) (val : name)
+| atom (val : syntax_atom)
 | list (ls : list syntax)
-| node (id : syntax_id) (sp : option span) (m : name) (args : list syntax)
+| node (val : syntax_node syntax)
 
 protected meta def syntax.to_format : syntax → format :=
 λ s, format.group $ format.nest 2 $ match s with
-| (syntax.ident id _ n none) := format!"({id}: ident `{n})"
-| (syntax.ident id _ n (some sc)) := format!"({id}: ident `{n} from {sc})"
-| (syntax.atom id _ val) := format!"(atom {val})"
+| (syntax.ident ident@{_ with msc := none}) := format!"({ident.id}: ident `{ident.name})"
+| (syntax.ident ident@{_ with msc := some sc}) := format!"({ident.id}: ident `{ident.name} from {sc})"
+| (syntax.atom atom) := format!"({atom.id}: atom {atom.val})"
 | (syntax.list ls) := format!"[{format.join $ ls.map syntax.to_format}]"
-| (syntax.node id _ m args) :=
-    let args := format.join $ args.map (λ arg, format!"\n{arg.to_format}") in
-    format!"({id}: node `{m} {args})"
+| (syntax.node node) :=
+    let args := format.join $ node.args.map (λ arg, format!"\n{arg.to_format}") in
+    format!"({node.id}: node `{node.m} {args})"
 end
 
 meta instance : has_to_format syntax := ⟨syntax.to_format⟩
@@ -64,8 +73,8 @@ structure macro :=
 (name : name)
 -- (read : reader)
 -- TODO: What else does an expander need? How to model recursive expansion?
-(expand : option (list syntax → syntax) := none)
-(resolve : option (scope → syntax_id → list syntax → resolve_m (list scope)) := none)
+(expand : option (syntax_node syntax → syntax) := none)
+(resolve : option (scope → syntax_node syntax → resolve_m (list scope)) := none)
 -- (elaborate : list syntax → expr → tactic expr)
 
 -- identifiers in macro expansions are annotated with incremental tags
@@ -83,34 +92,35 @@ section
 parameter (macros : name → option macro)
 
 def flip_tag (tag : ℕ) : syntax → syntax
-| (syntax.node id sp m args) := syntax.node id sp m (args.map
+| (syntax.node node) := syntax.node {node with args := (node.args.map
     -- flip_tag
-    (λ s, flip_tag s))
+    (λ s, flip_tag s))}
 | (syntax.list ls) := syntax.list (ls.map
     -- flip_tag
     (λ s, flip_tag s))
-| (syntax.ident id sp n none) := syntax.ident id sp n (some tag)
-| (syntax.ident id sp n (some tag')) := syntax.ident id sp n (if tag = tag' then none else some tag')
+| (syntax.ident ident@{_ with msc := none}) := syntax.ident {ident with msc := some tag}
+| (syntax.ident ident@{_ with msc := some tag'}) :=
+    syntax.ident {ident with msc := if tag = tag' then none else some tag'}
 | stx := stx
 using_well_founded { dec_tac := tactic.admit } -- TODO
 
 def expand : ℕ → syntax → exp_m syntax
-| (fuel + 1) (syntax.node id sp m args) :=
-do some (macro.mk _ (some expander) _) ← pure $ macros m
-     | syntax.node id sp m <$> args.mmap (expand fuel),
+| (fuel + 1) (syntax.node node) :=
+do some {_ with expand := some expander} ← pure $ macros node.m
+     | (λ args, syntax.node {node with args := args}) <$> node.args.mmap (expand fuel),
    tag ← mk_tag,
-   let args := args.map $ flip_tag tag,
+   let node := {node with args := node.args.map $ flip_tag tag},
    -- expand recursively
-   expand fuel $ flip_tag tag $ expander args
+   expand fuel $ flip_tag tag $ expander node
 | _ stx := pure stx
 
 def resolve : scope → syntax → resolve_m unit
-| sc (syntax.node id sp m args) :=
-do some (macro.mk _ _ (some resolver)) ← pure $ macros m
-     | args.mmap' $ resolve sc,
-   arg_scopes ← resolver sc id args,
-   (arg_scopes.zip args).mmap' -- (uncurry resolve)
-                               (λ ⟨sc, stx⟩, resolve sc stx)
+| sc (syntax.node node) :=
+do some {_ with resolve := some resolver} ← pure $ macros node.m
+     | node.args.mmap' $ resolve sc,
+   arg_scopes ← resolver sc node,
+   (arg_scopes.zip node.args).mmap' -- (uncurry resolve)
+                                    (λ ⟨sc, stx⟩, resolve sc stx)
 | _ _ := pure ()
 using_well_founded { dec_tac := tactic.admit }
 end
@@ -121,11 +131,11 @@ def sp : option span := none
 
 def lambda_macro := {macro .
   name := "lambda",
-  resolve := some $ λ sc _ args,
-  do [syntax.ident id sp n msc, body] ← pure args
+  resolve := some $ λ sc node,
+  do [syntax.ident ident, body] ← pure node.args
        -- TODO: add `monad_error` class to remove lift (also, `monad_lift` seems to be broken)
        | state_t.lift unreachable,
-     pure [sc, sc.insert (n, msc) id]}
+     pure [sc, sc.insert (ident.name, ident.msc) ident.id]}
 
 def resolve_name (msc : option macro_scope_id) (sc : scope) : name → option resolved
 | (name.mk_string s n) :=
@@ -137,19 +147,19 @@ do {
 
 def ref_macro := {macro .
   name := "ref",
-  resolve := some $ λ sc _ args,
-  do [syntax.ident id _ n msc] ← pure args
+  resolve := some $ λ sc node,
+  do [syntax.ident ident] ← pure node.args
        | state_t.lift unreachable,
-     some resolved ← pure $ resolve_name msc sc n
-       | state_t.lift $ error sformat!"unknown identifier {n}",
-     state_t.modify (λ h, hash_map.insert h id resolved),
+     some resolved ← pure $ resolve_name ident.msc sc ident.name
+       | state_t.lift $ error sformat!"unknown identifier {ident.name}",
+     state_t.modify (λ h, hash_map.insert h ident.id resolved),
      pure []}
 
 def intro_x_macro := {macro .
   name := "intro_x",
-  expand := some $ λ args,
+  expand := some $ λ node,
     -- TODO: how to manage IDs?
-    syntax.node 5 sp "lambda" (syntax.ident 6 sp "x" none :: args)}
+    syntax.node ⟨5, sp, "lambda", syntax.ident ⟨6, sp, "x", none⟩ :: node.args⟩}
 
 def macros : name → option macro
 | "lambda" := some lambda_macro
@@ -172,30 +182,30 @@ match resolve' (expand' stx) with
 | except.ok    o := tactic.trace stx >> tactic.trace o
 end
 
-run_cmd test $ syntax.node 0 sp "lambda" [
-  syntax.ident 1 sp "x" none,
-  syntax.node 2 sp "ref" [
-    syntax.ident 3 sp "x" none
-  ]
-]
+run_cmd test $ syntax.node ⟨0, sp, "lambda", [
+  syntax.ident ⟨1, sp, "x", none⟩,
+  syntax.node ⟨2, sp, "ref", [
+    syntax.ident ⟨3, sp, "x", none⟩
+  ]⟩
+]⟩
 
 -- test macro shadowing
-run_cmd test $ syntax.node 0 sp "lambda" [
-  syntax.ident 1 sp "x" none,
-  syntax.node 4 sp "intro_x" [
-    syntax.node 2 sp "ref" [
-      syntax.ident 3 sp "x" none
-    ]
-  ]
-]
+run_cmd test $ syntax.node ⟨0, sp, "lambda", [
+  syntax.ident ⟨1, sp, "x", none⟩,
+  syntax.node ⟨4, sp, "intro_x", [
+    syntax.node ⟨2, sp, "ref", [
+      syntax.ident ⟨3, sp, "x", none⟩
+    ]⟩
+  ]⟩
+]⟩
 
 -- test field notation
-run_cmd test $ syntax.node 0 sp "lambda" [
-  syntax.ident 1 sp `x.y none,
-  syntax.node 2 sp "ref" [
-    syntax.ident 3 sp `x.y.z none
-  ]
-]
+run_cmd test $ syntax.node ⟨0, sp, "lambda", [
+  syntax.ident ⟨1, sp, `x.y, none⟩,
+  syntax.node ⟨2, sp, "ref", [
+    syntax.ident ⟨3, sp, `x.y.z, none⟩
+  ]⟩
+]⟩
 
 -- hygiene
 
@@ -208,22 +218,22 @@ def replace_prefix' : name → name → name → name
 end name
 
 def α_conv (rsm : resolve_map) (σ : syntax_id → name) : syntax → syntax
-| (syntax.ident id sp n msc) := match rsm.find id with
-  | some r := syntax.ident id none (n.replace_prefix' r.prefix (σ r.decl)) msc
-  | none   := syntax.ident id none (σ id) msc
+| (syntax.ident ident) := match rsm.find ident.id with
+  | some r := syntax.ident {ident with sp := none, name := ident.name.replace_prefix' r.prefix (σ r.decl)}
+  | none   := syntax.ident {ident with sp := none, name := σ ident.id}
   end
-| (syntax.node id sp m args) := syntax.node id sp m (args.map (λ a, α_conv a))
+| (syntax.node node) := syntax.node {node with args := node.args.map (λ a, α_conv a)}
 | (syntax.list ls) := syntax.list (ls.map (λ a, α_conv a))
-| (syntax.atom id sp s) := syntax.atom id sp s
+| a@(syntax.atom _) := a
 using_well_founded { dec_tac := tactic.admit }
 
 run_cmd
-let stx := syntax.node 0 sp "lambda" [
-  syntax.ident 1 sp `x.y none,
-  syntax.node 2 sp "ref" [
-    syntax.ident 3 sp `x.y.z none
-  ]
-] in
+let stx := syntax.node ⟨0, sp, "lambda", [
+  syntax.ident ⟨1, sp, `x.y, none⟩,
+  syntax.node ⟨2, sp, "ref", [
+    syntax.ident ⟨3, sp, `x.y.z, none⟩
+  ]⟩
+]⟩ in
 match resolve' (expand' stx) with
 | except.ok (_, rsm) := tactic.trace (α_conv rsm (λ id, if id = 1 then `a else `b) stx)
 | except.error _ := tactic.skip
