@@ -41,8 +41,8 @@ inductive syntax
 
 protected meta def syntax.to_format : syntax → format :=
 λ s, format.group $ format.nest 2 $ match s with
-| (syntax.ident ident@{_ with msc := none}) := format!"({ident.id}: ident `{ident.name})"
-| (syntax.ident ident@{_ with msc := some sc}) := format!"({ident.id}: ident `{ident.name} from {sc})"
+| (syntax.ident ident@{msc := none, ..}) := format!"({ident.id}: ident `{ident.name})"
+| (syntax.ident ident@{msc := some sc, ..}) := format!"({ident.id}: ident `{ident.name} from {sc})"
 | (syntax.atom atom) := format!"({atom.id}: atom {atom.val})"
 | (syntax.list ls) := format!"[{format.join $ ls.map syntax.to_format}]"
 | (syntax.node node) :=
