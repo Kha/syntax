@@ -98,27 +98,27 @@ def flip_tag (tag : ℕ) : syntax → syntax
 | (syntax.list ls) := syntax.list (ls.map
     -- flip_tag
     (λ s, flip_tag s))
-| (syntax.ident ident@{_ with msc := none}) := syntax.ident {ident with msc := some tag}
-| (syntax.ident ident@{_ with msc := some tag'}) :=
+| (syntax.ident ident@{msc := none, ..}) := syntax.ident {ident with msc := some tag}
+| (syntax.ident ident@{msc := some tag', ..}) :=
     syntax.ident {ident with msc := if tag = tag' then none else some tag'}
 | stx := stx
 using_well_founded { dec_tac := tactic.admit } -- TODO
 
 def expand : ℕ → syntax → exp_m syntax
 | (fuel + 1) (syntax.node node) :=
-do some {_ with expand := some expander} ← pure $ macros node.m
+do some {expand := some exp, ..} ← pure $ macros node.m
      | (λ args, syntax.node {node with args := args}) <$> node.args.mmap (expand fuel),
    tag ← mk_tag,
    let node := {node with args := node.args.map $ flip_tag tag},
    -- expand recursively
-   expand fuel $ flip_tag tag $ expander node
+   expand fuel $ flip_tag tag $ exp node
 | _ stx := pure stx
 
 def resolve : scope → syntax → resolve_m unit
 | sc (syntax.node node) :=
-do some {_ with resolve := some resolver} ← pure $ macros node.m
+do some {resolve := some res, ..} ← pure $ macros node.m
      | node.args.mmap' $ resolve sc,
-   arg_scopes ← resolver sc node,
+   arg_scopes ← res sc node,
    (arg_scopes.zip node.args).mmap' -- (uncurry resolve)
                                     (λ ⟨sc, stx⟩, resolve sc stx)
 | _ _ := pure ()
