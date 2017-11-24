@@ -1,8 +1,62 @@
 import smt2.except
-import data.hash_map
 
 -- non-meta instance
 attribute [derive decidable_eq] name
+
+universes u v w
+
+namespace name
+  @[simp] protected def quick_lt : name → name → Prop
+  | anonymous        anonymous          := false
+  | anonymous        _                  := true
+  | (mk_numeral v n) (mk_numeral v' n') := v < v' ∨ v = v' ∧ n.quick_lt n'
+  | (mk_numeral _ _) (mk_string _ _)    := true
+  | (mk_string s n)  (mk_string s' n')  := s < s' ∨ s = s' ∧ n.quick_lt n'
+  | _                _                  := false
+
+  instance decidable_rel_quick_lt : decidable_rel name.quick_lt :=
+  begin
+    intros n n',
+    induction n generalizing n',
+    case anonymous {
+      by_cases n' = anonymous; simp *; apply_instance
+    },
+    all_goals { cases n'; simp; apply_instance }
+  end
+end name
+
+namespace option
+  variables {α : Type u} (r : α → α → Prop)
+
+  @[simp] protected def lt : option α → option α → Prop
+  | none (some x) := true
+  | (some x) (some y) := r x y
+  | _ _ := false
+
+  instance decidable_rel_lt [decidable_rel r] : decidable_rel (option.lt r) :=
+  by intros a b; cases a; cases b; simp; apply_instance
+
+  protected def has_lt [has_lt α] : has_lt (option α) := ⟨option.lt (<)⟩
+end option
+
+namespace rbmap
+  variables {α : Type u} {β : Type v} {δ : Type w} {lt : α → α → Prop}
+  open format prod
+  variables [has_to_format α] [has_to_format β]
+
+  private meta def format_key_data (a : α) (b : β) (first : bool) : format :=
+  (if first then to_fmt "" else to_fmt "," ++ line) ++ to_fmt a ++ space ++ to_fmt "←" ++ space ++ to_fmt b
+
+  private meta def to_format (m : rbmap α β lt) : format :=
+  group $ to_fmt "⟨" ++ nest 1 (fst (fold (λ a b p, (fst p ++ format_key_data a b (snd p), ff)) m (to_fmt "", tt))) ++
+          to_fmt "⟩"
+
+  meta instance : has_to_format (rbmap α β lt) :=
+  ⟨to_format⟩
+end rbmap
+
+def name.has_lt_quick : has_lt name := ⟨name.quick_lt⟩
+local attribute [instance] name.has_lt_quick option.has_lt
 
 open except
 open state
@@ -62,8 +116,8 @@ structure resolved :=
 
 meta instance : has_to_format resolved := ⟨λ r, to_fmt (r.decl, r.prefix)⟩
 
-@[reducible] def resolve_map := hash_map syntax_id (λ _, resolved)
-def scope := hash_map (name × option macro_scope_id) (λ _, syntax_id)
+@[reducible] def resolve_map := rbmap syntax_id resolved
+def scope := rbmap (name × option macro_scope_id) syntax_id
 
 @[reducible] def resolve_m := state_t resolve_map (except string)
 
@@ -152,7 +206,7 @@ def ref_macro := {macro .
        | state_t.lift unreachable,
      some resolved ← pure $ resolve_name ident.msc sc ident.name
        | state_t.lift $ error sformat!"unknown identifier {ident.name}",
-     state_t.modify (λ h, hash_map.insert h ident.id resolved),
+     state_t.modify (λ h, h.insert ident.id resolved),
      pure []}
 
 def intro_x_macro := {macro .
@@ -171,8 +225,8 @@ def expand' (stx : syntax) : syntax :=
 (expand macros 1000 stx {next_tag := 0}).1
 
 def resolve' (stx : syntax) : except string (syntax × resolve_map) :=
-let sc : scope := mk_hash_map (λ ⟨n, _⟩, n.to_string.length), -- TODO
-    resolve_map : resolve_map := mk_hash_map id in
+let sc : scope := mk_rbmap _ _ _,
+    resolve_map : resolve_map := mk_rbmap _ _ _ in
     do ⟨(), rsm⟩ ← resolve macros sc stx resolve_map,
        pure (stx, rsm)
 
