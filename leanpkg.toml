@@ -2,6 +2,3 @@
 name = "syntax"
 version = "0.1"
 lean_version = "master"
-
-[dependencies]
-smt2_interface = {git = "https://github.com/leanprover/smt2_interface", rev = "8225227641ac3033bc82e939dc66edb1ae4fb720"}
