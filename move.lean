@@ -63,5 +63,123 @@ namespace rbmap
   ⟨to_format⟩
 end rbmap
 
-def unreachable {α : Type} : except string α :=
-except.error "unreachable"
+namespace list
+  section
+  parameters {α : Type u} {β : Type v}
+
+  def pmap : Π (xs : list α), (Π (x : α), x ∈ xs → β) → list β
+  | []       f := []
+  | (a :: l) f := f a (mem_cons_self a l) :: pmap l (λ x h, f x (mem_cons_of_mem a h))
+  end
+end list
+
+namespace monad
+  def kleisli {m : Type u → Type v} [monad m] {α β γ : Type u} : (α → m β) → (β → m γ) → (α → m γ) :=
+  λ a b, (>>= b) ∘ a
+
+  infixr ` >=> `:55 := kleisli
+end monad
+
+instance : monad.{u u} id :=
+{pure := @id, bind := λ _ _ x f, f x,
+ id_map := by intros; refl,
+ pure_bind := by intros; refl,
+ bind_assoc := by intros; refl}
+
+def reader_t (r : Type u) (m : Type u → Type v) [monad m] (α : Type u) : Type (max u v) :=
+r → m α
+
+@[reducible] def reader (r : Type u) := reader_t r id
+
+open monad
+namespace reader_t
+section
+  variable  {r : Type u}
+  variable  {m : Type u → Type v}
+  variable  [monad m]
+  variables {α β : Type u}
+
+  def read : reader_t r m r :=
+  λ r, pure r
+
+  protected def run : r → reader_t r m α → m α :=
+  λ r x, x r
+
+  protected def pure (a : α) : reader_t r m α :=
+  λ r, pure a
+
+  protected def bind (x : reader_t r m α) (f : α → reader_t r m β) : reader_t r m β :=
+  λ r, do a ← x r,
+          f a r
+
+  local attribute [simp] reader_t.bind reader_t.pure monad.bind_pure monad.pure_bind monad.bind_assoc
+
+  instance : monad (reader_t r m) :=
+  {pure := @reader_t.pure _ _ _, bind := @reader_t.bind _ _ _,
+   id_map := by intros; simp [function.comp],
+   pure_bind := by intros; simp,
+   bind_assoc := by intros; simp}
+
+  protected def lift (a : m α) : reader_t r m α :=
+  λ r, a
+
+  instance : monad_transformer (reader_t r) :=
+  {is_monad := @reader_t.monad _,
+   monad_lift := @reader_t.lift _}
+end
+end reader_t
+
+--instance (r r' m α) [monad m] [has_coe r' r] : has_coe (reader_t r m α) (reader_t r' m α) :=
+--⟨λ x r, x r⟩
+
+def with_reader_t {r r' m α} [monad m] (f : r' → r) : reader_t r m α → reader_t r' m α :=
+λ x r, x (f r)
+
+def map_reader_t {r m m' α β} [monad m] [monad m'] (f : m α → m' β) : reader_t r m α → reader_t r m' β :=
+λ x r, f (x r)
+
+protected def state_t.run {σ α : Type u} {m : Type u → Type v} [monad m] (st : σ) (x : state_t σ m α) : m (α × σ) :=
+x st
+
+protected def state.run {σ α : Type u} (st : σ) (x : state_t σ id α) : α × σ :=
+state_t.run st x
+
+class monad_state (s : inout Type u) (m : Type u → Type v) :=
+[monad_m : monad m]
+(read : m s)
+(write : s → m punit)
+attribute [instance] monad_state.monad_m
+
+@[inline] def read {σ m} [monad_state σ m] : m σ := monad_state.read _ _
+@[inline] def write {σ m} [monad_state σ m] : σ → m punit := monad_state.write _
+@[inline] def modify {σ m} [monad_state σ m] (f : σ → σ) : m punit :=
+do s ← read, write (f s)
+
+instance (s m) [monad m] : monad_state s (state_t s m) :=
+{read := state_t.read, write := state_t.write'}
+
+--instance monad_state_lift (t s m) [monad_state s m] [monad_transformer t] : monad_state s (t m) :=
+--{read := monad_transformer.monad_lift _ _ _ read,
+-- write := monad_transformer.monad_lift _ _ _ ∘ write}
+
+instance monad_state_lift (r s m) [monad_state s m] [monad m] : monad_state s (reader_t r m) :=
+{read := monad_transformer.monad_lift _ _ _ read,
+ write := monad_transformer.monad_lift _ _ _ ∘ write}
+
+class monad_error (ε : inout Type u) (m : Type v → Type w) :=
+[monad_m : monad m]
+(fail : Π {α : Type v}, ε → m α)
+
+@[inline] def fail {ε m α} [monad_error ε m] : ε → m α := monad_error.fail _
+
+instance (ε) : monad_error ε (except ε) :=
+{fail := @except.error _}
+
+instance monad_error_lift_reader_t (r ε m) [monad_error ε m] [monad m] : monad_error ε (reader_t r m) :=
+{fail := λ _, monad_transformer.monad_lift _ _ _ ∘ fail}
+
+instance monad_error_lift_state_t (σ ε m) [monad_error ε m] [monad m] : monad_error ε (state_t σ m) :=
+{fail := λ _, monad_transformer.monad_lift _ _ _ ∘ fail}
+
+def unreachable {α m} [monad_error string m] : m α :=
+fail "unreachable"

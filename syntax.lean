@@ -43,7 +43,3 @@ end
 meta instance : has_to_format syntax := ⟨syntax.to_format⟩
 meta instance : has_to_string syntax := ⟨to_string ∘ to_fmt⟩
 meta instance : has_repr syntax := ⟨to_string ∘ to_fmt⟩
-
--- some examples
-
--- hygiene
