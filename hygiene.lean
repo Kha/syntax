@@ -19,7 +19,7 @@ protected def except.assert {ε} : except ε Prop → Prop
 | (except.error _) := false
 
 theorem hygienic (s₁ s₂ : syntax) (st : parse_state) :
-except.assert $ reader_t.run st $
+except.assert $ parse_m.run' st () $
 (do s₁' ← expand' s₁,
     s₂' ← expand' s₂,
     (_, rst) ← resolve' s₁',

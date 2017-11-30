@@ -5,7 +5,19 @@ open state
 
 attribute [instance] name.has_lt_quick option.has_lt
 
---@[reducible] def parse_m (r σ) := reader_t r $ state_t σ $ except string
+@[reducible] def parse_m (r σ) := reader_t r $ state_t σ $ except string
+
+def parse_m.with_cfg {r r' σ α} (f : r → r') : parse_m r' σ α → parse_m r σ α :=
+with_reader_t f
+
+def parse_m.with_state {r σ σ' α} (f : σ → σ') : parse_m r σ' α → parse_m r σ α :=
+map_reader_t (with_state_t f)
+
+def parse_m.run {r σ α} (cfg : r) (st : σ): parse_m r σ α → except string (α × σ) :=
+state_t.run st ∘ reader_t.run cfg
+
+def parse_m.run' {r σ α} (cfg : r) (st : σ): parse_m r σ α → except string α :=
+λ x, prod.fst <$> parse_m.run cfg st x
 
 structure resolved :=
 -- local or global
@@ -26,7 +38,7 @@ structure resolve_state :=
 
 def scope := rbmap (name × option macro_scope_id) syntax_id
 
-@[reducible] def resolve_m := reader_t resolve_cfg $ state_t resolve_state $ except string
+@[reducible] def resolve_m := parse_m resolve_cfg resolve_state
 
 def exp_fuel := 1000
 
@@ -42,13 +54,11 @@ structure parse_state :=
 (macros : rbmap name macro)
 (resolve_cfg : resolve_cfg)
 
-@[reducible] def parse_m := state_t parse_state id
-
 -- identifiers in macro expansions are annotated with incremental tags
 structure expand_state :=
 (next_tag : ℕ)
 
-@[reducible] def exp_m := reader_t parse_state $ state_t expand_state $ except string
+@[reducible] def exp_m := parse_m parse_state expand_state
 
 def mk_tag : exp_m ℕ :=
 do st ← read,
@@ -79,27 +89,26 @@ do cfg ← reader_t.read,
    expand fuel $ flip_tag tag $ exp node
 | _ stx := pure stx
 
-@[reducible] def resolve_m' := reader_t parse_state $ state_t resolve_state $ except string
-
---instance (r r' m α) [monad m] [has_coe r' r] : has_coe (reader_t r m α) (reader_t r' m α) :=
---⟨λ x r, x r⟩
+@[reducible] def resolve_m' := parse_m parse_state resolve_state
 
 def resolve : scope → syntax → resolve_m' unit
 | sc (syntax.node node) :=
 do cfg ← reader_t.read,
    some {resolve := some res, ..} ← pure $ cfg.macros.find node.m
      | node.args.mmap' $ resolve sc,
-   arg_scopes ← with_reader_t parse_state.resolve_cfg $ res sc node,
+   arg_scopes ← parse_m.with_cfg parse_state.resolve_cfg $ res sc node,
    (arg_scopes.zip node.args).mmap' -- (uncurry resolve)
                                     (λ ⟨sc, stx⟩, resolve sc stx)
 | _ _ := pure ()
 using_well_founded { dec_tac := tactic.admit }
 
-def expand' (stx : syntax) : reader_t parse_state (except string) syntax :=
-map_reader_t (λ st, prod.fst <$> state_t.run {expand_state . next_tag := 0} st) (expand 1000 stx)
+def expand' (stx : syntax) : parse_m parse_state unit syntax :=
+parse_m.with_state (λ _, {expand_state . next_tag := 0}) (expand 1000 stx)
 
-def resolve' (stx : syntax) : reader_t parse_state (except string) (syntax × resolve_state) :=
+def resolve' (stx : syntax) : parse_m parse_state unit (syntax × resolve_state) :=
 let sc : scope := mk_rbmap _ _ _,
     st : resolve_state := ⟨mk_rbmap _ _ _⟩ in
-    do ⟨(), rsm⟩ ← map_reader_t (state_t.run st) $ resolve sc stx,
+    parse_m.with_state (λ _, st) $
+    do resolve sc stx,
+       rsm ← read,
        pure (stx, rsm)

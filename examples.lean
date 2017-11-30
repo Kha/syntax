@@ -45,7 +45,7 @@ def cfg : parse_state :=
  resolve_cfg := {global_scope := mk_rbmap _ _}}
 
 meta def test (stx : syntax) : command :=
-match (expand' stx >>= resolve') cfg with
+match (expand' stx >>= resolve').run' cfg () with
 | except.error e := tactic.fail e
 | except.ok    (stx, ⟨rsm⟩) := tactic.trace stx >> tactic.trace (stx, rsm)
 end
@@ -83,7 +83,7 @@ let stx := syntax.node ⟨0, sp, "lambda", [
     syntax.ident ⟨3, sp, `x.y.z, none⟩
   ]⟩
 ]⟩ in
-match (expand' stx >>= resolve') cfg with
+match (expand' stx >>= resolve').run' cfg () with
 | except.ok (_, ⟨rsm⟩) := tactic.trace (α_conv rsm (λ id, if id = 1 then `a else `b) stx)
 | except.error _ := tactic.skip
 end

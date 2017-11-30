@@ -144,6 +144,9 @@ x st
 protected def state.run {σ α : Type u} (st : σ) (x : state_t σ id α) : α × σ :=
 state_t.run st x
 
+def with_state_t {σ σ' α : Type u} {m : Type u → Type u} [monad m] (f : σ → σ') : state_t σ' m α → state_t σ m α :=
+λ x st, (λ p : α × σ', (prod.fst p, st)) <$> x (f st)
+
 class monad_state (s : inout Type u) (m : Type u → Type v) :=
 [monad_m : monad m]
 (read : m s)
