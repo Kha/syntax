@@ -122,10 +122,6 @@ section
 
   protected def lift (a : m α) : reader_t r m α :=
   λ r, a
-
-  instance : monad_transformer (reader_t r) :=
-  {is_monad := @reader_t.monad _,
-   monad_lift := @reader_t.lift _}
 end
 end reader_t
 
@@ -161,13 +157,9 @@ do s ← read, write (f s)
 instance (s m) [monad m] : monad_state s (state_t s m) :=
 {read := state_t.read, write := state_t.write'}
 
---instance monad_state_lift (t s m) [monad_state s m] [monad_transformer t] : monad_state s (t m) :=
---{read := monad_transformer.monad_lift _ _ _ read,
--- write := monad_transformer.monad_lift _ _ _ ∘ write}
-
 instance monad_state_lift (r s m) [monad_state s m] [monad m] : monad_state s (reader_t r m) :=
-{read := monad_transformer.monad_lift _ _ _ read,
- write := monad_transformer.monad_lift _ _ _ ∘ write}
+{read := reader_t.lift read,
+ write := reader_t.lift ∘ write}
 
 class monad_error (ε : inout Type u) (m : Type v → Type w) :=
 [monad_m : monad m]
@@ -179,10 +171,10 @@ instance (ε) : monad_error ε (except ε) :=
 {fail := @except.error _}
 
 instance monad_error_lift_reader_t (r ε m) [monad_error ε m] [monad m] : monad_error ε (reader_t r m) :=
-{fail := λ _, monad_transformer.monad_lift _ _ _ ∘ fail}
+{fail := λ _, reader_t.lift ∘ fail}
 
 instance monad_error_lift_state_t (σ ε m) [monad_error ε m] [monad m] : monad_error ε (state_t σ m) :=
-{fail := λ _, monad_transformer.monad_lift _ _ _ ∘ fail}
+{fail := λ _, reader_t.lift ∘ fail}
 
 def unreachable {α m} [monad_error string m] : m α :=
 fail "unreachable"

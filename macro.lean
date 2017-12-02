@@ -79,6 +79,7 @@ def flip_tag (tag : ℕ) : syntax → syntax
 using_well_founded { dec_tac := tactic.admit } -- TODO
 
 def expand : ℕ → syntax → exp_m syntax
+| 0 _ := fail "macro expansion limit exceeded"
 | (fuel + 1) (syntax.node node) :=
 do cfg ← reader_t.read,
    some {expand := some exp, ..} ← pure $ cfg.macros.find node.m
