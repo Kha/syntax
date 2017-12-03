@@ -86,7 +86,8 @@ do s₁' ← expand' s₁,
 lemma expand_idem (s : syntax) (cfg : parse_state) :
 parse_m.passert cfg () $
 do s' ← expand' s,
-   s'' ← expand' s',
+   s'' ← expand' s'
+     | pure true,
    pure $ s'' = s' :=
 begin
   -- generalize states (irrelevant) and step counts
