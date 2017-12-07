@@ -114,8 +114,8 @@ begin
         intro,
         induction val.args generalizing st st₂; simp [mmap],
         case list.cons {
-          apply parse_m.passert'_mp (ih_1 _ st st₂ _ (nat.le_of_succ_le_succ hsteps₂)), intros st' s' expand_s',
-          apply parse_m.passert'_mp (ih_1_1 st' st₂), intros st'' args' mmap_args',
+          apply parse_m.passert'_mp (steps_ih _ st st₂ _ (nat.le_of_succ_le_succ hsteps₂)), intros st' s' expand_s',
+          apply parse_m.passert'_mp (ih st' st₂), intros st'' args' mmap_args',
           apply parse_m.passert'_mp expand_s', intros st''' s''' _,
           apply parse_m.passert'_mp_no_state mmap_args', intros args this,
           -- TODO: use whnf_ginductive in injection
@@ -129,13 +129,13 @@ begin
     { cases h : rbmap.find cfg.macros val.m with m,
       case none { simp [expand, h], apply expand_mmap },
       case some {
-        cases m, cases expand,
+        cases m, cases m_expand,
         case none { simp [expand, h], apply expand_mmap },
         case some {
           -- recursive case 1: re-expand the expansion of s. `expand s` will do one more step than `expand s'`.
           -- `mk_tag` is so simple that `simp` can automatically transform it to its spec
           simp [expand, mk_tag],
-          apply parse_m.passert'_mp (ih_1 _ _ st₂ _ (nat.le_of_succ_le hsteps₂)), intros st' s' expand_s',
+          apply parse_m.passert'_mp (steps_ih _ _ st₂ _ (nat.le_of_succ_le hsteps₂)), intros st' s' expand_s',
           apply expand_s',
         },
       }
