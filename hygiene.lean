@@ -58,7 +58,7 @@ variable (x : parse_m r σ α)
   parse_m.passert' cfg st (write st') p = p st' punit.star := sorry
 
 @[simp] lemma passert'_reader_t_read (p) :
-  parse_m.passert' cfg st (reader_t.read) p = p st cfg := sorry
+  parse_m.passert' cfg st (ask) p = p st cfg := sorry
 
 lemma passert'_mp {p : parse_m r σ α} {s₀ : σ} {post₁ post₂ : σ → α → Prop} :
      parse_m.passert' cfg s₀ p post₁ → (∀ s a, post₁ s a → post₂ s a) → parse_m.passert' cfg s₀ p post₂ :=

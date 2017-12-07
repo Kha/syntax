@@ -99,7 +99,7 @@ section
   variable  [monad m]
   variables {α β : Type u}
 
-  def read : reader_t r m r :=
+  protected def ask : reader_t r m r :=
   λ r, pure r
 
   protected def run : r → reader_t r m α → m α :=
@@ -122,6 +122,9 @@ section
 
   protected def lift (a : m α) : reader_t r m α :=
   λ r, a
+
+  instance : monad_transformer (reader_t r) :=
+  {is_monad := @reader_t.monad r, monad_lift := @reader_t.lift r}
 end
 end reader_t
 
@@ -147,19 +150,19 @@ class monad_state (s : inout Type u) (m : Type u → Type v) :=
 [monad_m : monad m]
 (read : m s)
 (write : s → m punit)
-attribute [instance] monad_state.monad_m
+--attribute [instance] monad_state.monad_m
 
 @[inline] def read {σ m} [monad_state σ m] : m σ := monad_state.read _ _
 @[inline] def write {σ m} [monad_state σ m] : σ → m punit := monad_state.write _
-@[inline] def modify {σ m} [monad_state σ m] (f : σ → σ) : m punit :=
+@[inline] def modify {σ m} [monad_state σ m] [monad m] (f : σ → σ) : m punit :=
 do s ← read, write (f s)
 
 instance (s m) [monad m] : monad_state s (state_t s m) :=
 {read := state_t.read, write := state_t.write'}
 
-instance monad_state_lift (r s m) [monad_state s m] [monad m] : monad_state s (reader_t r m) :=
-{read := reader_t.lift read,
- write := reader_t.lift ∘ write}
+instance monad_state_lift (s m m') [has_monad_lift m m'] [monad_state s m] [monad m] [monad m'] : monad_state s m' :=
+{read := monad_lift (read : m _),
+ write := monad_lift ∘ (write : _ → m _)}
 
 class monad_error (ε : inout Type u) (m : Type v → Type w) :=
 [monad_m : monad m]
@@ -170,11 +173,20 @@ class monad_error (ε : inout Type u) (m : Type v → Type w) :=
 instance (ε) : monad_error ε (except ε) :=
 {fail := @except.error _}
 
-instance monad_error_lift_reader_t (r ε m) [monad_error ε m] [monad m] : monad_error ε (reader_t r m) :=
-{fail := λ _, reader_t.lift ∘ fail}
-
-instance monad_error_lift_state_t (σ ε m) [monad_error ε m] [monad m] : monad_error ε (state_t σ m) :=
-{fail := λ _, reader_t.lift ∘ fail}
+instance monad_error_lift (ε m m') [has_monad_lift m m'] [monad_error ε m] [monad m] [monad m'] : monad_error ε m' :=
+{fail := λ _, monad_lift ∘ @fail _ m _ _}
 
 def unreachable {α m} [monad_error string m] : m α :=
 fail "unreachable"
+
+class monad_reader (r : inout Type u) (m : Type u → Type v) :=
+[monad_m : monad m]
+(ask : m r)
+
+@[inline] def ask {r m} [monad_reader r m] : m r := monad_reader.ask _ _
+
+instance (r m) [monad m] : monad_reader r (reader_t r m) :=
+{ask := reader_t.ask}
+
+instance monad_reader_lift (r m m') [has_monad_lift m m'] [monad_reader r m] [monad m] [monad m'] : monad_reader r m' :=
+{ask := monad_lift (ask : m _)}

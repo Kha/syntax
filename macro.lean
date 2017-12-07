@@ -5,19 +5,28 @@ open state
 
 attribute [instance] name.has_lt_quick option.has_lt
 
-@[reducible] def parse_m (r σ) := reader_t r $ state_t σ $ except string
+@[irreducible] def parse_m (r σ) := reader_t r $ state_t σ $ except string
 
-def parse_m.with_cfg {r r' σ α} (f : r → r') : parse_m r' σ α → parse_m r σ α :=
+namespace parse_m
+local attribute [reducible] parse_m
+
+instance (r σ) : monad (parse_m r σ) := by unfold parse_m; apply_instance
+instance (r σ) : monad_error string (parse_m r σ) := by unfold parse_m; apply_instance
+instance (r σ) : monad_reader r (parse_m r σ) := by unfold parse_m; apply_instance
+instance (r σ) : monad_state σ (parse_m r σ) := by unfold parse_m; apply_instance
+
+def with_cfg {r r' σ α} (f : r → r') : parse_m r' σ α → parse_m r σ α :=
 with_reader_t f
 
-def parse_m.with_state {r σ σ' α} (f : σ → σ') : parse_m r σ' α → parse_m r σ α :=
+def with_state {r σ σ' α} (f : σ → σ') : parse_m r σ' α → parse_m r σ α :=
 map_reader_t (with_state_t f)
 
-def parse_m.run {r σ α} (cfg : r) (st : σ): parse_m r σ α → except string (α × σ) :=
+def run {r σ α} (cfg : r) (st : σ): parse_m r σ α → except string (α × σ) :=
 state_t.run st ∘ reader_t.run cfg
 
-def parse_m.run' {r σ α} (cfg : r) (st : σ): parse_m r σ α → except string α :=
+def run' {r σ α} (cfg : r) (st : σ): parse_m r σ α → except string α :=
 λ x, prod.fst <$> parse_m.run cfg st x
+end parse_m
 
 structure resolved :=
 -- local or global
@@ -81,7 +90,7 @@ using_well_founded { dec_tac := tactic.admit } -- TODO
 def expand : ℕ → syntax → exp_m syntax
 | 0 _ := fail "macro expansion limit exceeded"
 | (fuel + 1) (syntax.node node) :=
-do cfg ← reader_t.read,
+do cfg ← ask,
    some {expand := some exp, ..} ← pure $ cfg.macros.find node.m
      | (λ args, syntax.node {node with args := args}) <$> node.args.mmap (expand fuel),
    tag ← mk_tag,
@@ -94,7 +103,7 @@ do cfg ← reader_t.read,
 
 def resolve : scope → syntax → resolve_m' unit
 | sc (syntax.node node) :=
-do cfg ← reader_t.read,
+do cfg ← ask,
    some {resolve := some res, ..} ← pure $ cfg.macros.find node.m
      | node.args.mmap' $ resolve sc,
    arg_scopes ← parse_m.with_cfg parse_state.resolve_cfg $ res sc node,
