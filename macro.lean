@@ -5,27 +5,27 @@ open state
 
 attribute [instance] name.has_lt_quick option.has_lt
 
-@[irreducible] def parse_m (r σ) := reader_t r $ state_t σ $ except string
+@[irreducible] def parse_m (r σ) := except_t string $ reader_t r $ state σ
 
 namespace parse_m
 local attribute [reducible] parse_m
 
 instance (r σ) : monad (parse_m r σ) := by unfold parse_m; apply_instance
-instance (r σ) : monad_error string (parse_m r σ) := by unfold parse_m; apply_instance
-instance (r σ) : monad_reader r (parse_m r σ) := by unfold parse_m; apply_instance
-instance (r σ) : monad_state σ (parse_m r σ) := by unfold parse_m; apply_instance
+instance (r σ) : monad_except string (parse_m r σ) := by dunfold parse_m; apply_instance
+instance (r σ) : monad_reader r (parse_m r σ) := by dunfold parse_m; apply_instance
+instance (r σ) : monad_state σ (parse_m r σ) := by dunfold parse_m; apply_instance
 
 def with_cfg {r r' σ α} (f : r → r') : parse_m r' σ α → parse_m r σ α :=
-with_reader_t f
+map_except_t $ with_reader_t f
 
 def with_state {r σ σ' α} (f : σ → σ') : parse_m r σ' α → parse_m r σ α :=
-map_reader_t (with_state_t f)
+map_except_t $ map_reader_t $ with_state_t f
 
-def run {r σ α} (cfg : r) (st : σ): parse_m r σ α → except string (α × σ) :=
-state_t.run st ∘ reader_t.run cfg
+def run {r σ α} (cfg : r) (st : σ): parse_m r σ α → except string α × σ :=
+state.run st ∘ reader_t.run cfg ∘ except_t.run
 
 def run' {r σ α} (cfg : r) (st : σ): parse_m r σ α → except string α :=
-λ x, prod.fst <$> parse_m.run cfg st x
+λ x, prod.fst $ parse_m.run cfg st x
 end parse_m
 
 structure resolved :=
@@ -70,8 +70,8 @@ structure expand_state :=
 @[reducible] def exp_m := parse_m parse_state expand_state
 
 def mk_tag : exp_m ℕ :=
-do st ← read,
-   write {st with next_tag := st.next_tag + 1},
+do st ← get,
+   put {st with next_tag := st.next_tag + 1},
    pure st.next_tag
 
 def flip_tag (tag : ℕ) : syntax → syntax
@@ -88,9 +88,9 @@ def flip_tag (tag : ℕ) : syntax → syntax
 using_well_founded { dec_tac := tactic.admit } -- TODO
 
 def expand : ℕ → syntax → exp_m syntax
-| 0 _ := fail "macro expansion limit exceeded"
+| 0 _ := throw "macro expansion limit exceeded"
 | (fuel + 1) (syntax.node node) :=
-do cfg ← ask,
+do cfg ← read,
    some {expand := some exp, ..} ← pure $ cfg.macros.find node.m
      | (λ args, syntax.node {node with args := args}) <$> node.args.mmap (expand fuel),
    tag ← mk_tag,
@@ -103,7 +103,7 @@ do cfg ← ask,
 
 def resolve : scope → syntax → resolve_m' unit
 | sc (syntax.node node) :=
-do cfg ← ask,
+do cfg ← read,
    some {resolve := some res, ..} ← pure $ cfg.macros.find node.m
      | node.args.mmap' $ resolve sc,
    arg_scopes ← parse_m.with_cfg parse_state.resolve_cfg $ res sc node,
@@ -120,5 +120,5 @@ let sc : scope := mk_rbmap _ _ _,
     st : resolve_state := ⟨mk_rbmap _ _ _⟩ in
     parse_m.with_state (λ _, st) $
     do resolve sc stx,
-       rsm ← read,
+       rsm ← get,
        pure (stx, rsm)

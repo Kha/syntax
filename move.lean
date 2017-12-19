@@ -1,5 +1,3 @@
-import except
-
 -- non-meta instance
 attribute [derive decidable_eq] name
 
@@ -80,113 +78,11 @@ namespace monad
   infixr ` >=> `:55 := kleisli
 end monad
 
-instance : monad.{u u} id :=
-{pure := @id, bind := λ _ _ x f, f x,
- id_map := by intros; refl,
- pure_bind := by intros; refl,
- bind_assoc := by intros; refl}
-
-def reader_t (r : Type u) (m : Type u → Type v) [monad m] (α : Type u) : Type (max u v) :=
-r → m α
-
-@[reducible] def reader (r : Type u) := reader_t r id
-
-open monad
-namespace reader_t
-section
-  variable  {r : Type u}
-  variable  {m : Type u → Type v}
-  variable  [monad m]
-  variables {α β : Type u}
-
-  protected def ask : reader_t r m r :=
-  λ r, pure r
-
-  protected def run : r → reader_t r m α → m α :=
-  λ r x, x r
-
-  protected def pure (a : α) : reader_t r m α :=
-  λ r, pure a
-
-  protected def bind (x : reader_t r m α) (f : α → reader_t r m β) : reader_t r m β :=
-  λ r, do a ← x r,
-          f a r
-
-  local attribute [simp] reader_t.bind reader_t.pure monad.bind_pure monad.pure_bind monad.bind_assoc
-
-  instance : monad (reader_t r m) :=
-  {pure := @reader_t.pure _ _ _, bind := @reader_t.bind _ _ _,
-   id_map := by intros; simp [function.comp],
-   pure_bind := by intros; simp,
-   bind_assoc := by intros; simp}
-
-  protected def lift (a : m α) : reader_t r m α :=
-  λ r, a
-
-  instance : monad_transformer (reader_t r) :=
-  {is_monad := @reader_t.monad r, monad_lift := @reader_t.lift r}
-end
-end reader_t
-
---instance (r r' m α) [monad m] [has_coe r' r] : has_coe (reader_t r m α) (reader_t r' m α) :=
---⟨λ x r, x r⟩
-
-def with_reader_t {r r' m α} [monad m] (f : r' → r) : reader_t r m α → reader_t r' m α :=
-λ x r, x (f r)
-
-def map_reader_t {r m m' α β} [monad m] [monad m'] (f : m α → m' β) : reader_t r m α → reader_t r m' β :=
-λ x r, f (x r)
-
 protected def state_t.run {σ α : Type u} {m : Type u → Type v} [monad m] (st : σ) (x : state_t σ m α) : m (α × σ) :=
 x st
 
 protected def state.run {σ α : Type u} (st : σ) (x : state_t σ id α) : α × σ :=
 state_t.run st x
 
-def with_state_t {σ σ' α : Type u} {m : Type u → Type u} [monad m] (f : σ → σ') : state_t σ' m α → state_t σ m α :=
-λ x st, (λ p : α × σ', (prod.fst p, st)) <$> x (f st)
-
-class monad_state (s : inout Type u) (m : Type u → Type v) :=
-[monad_m : monad m]
-(read : m s)
-(write : s → m punit)
---attribute [instance] monad_state.monad_m
-
-@[inline] def read {σ m} [monad_state σ m] : m σ := monad_state.read _ _
-@[inline] def write {σ m} [monad_state σ m] : σ → m punit := monad_state.write _
-@[inline] def modify {σ m} [monad_state σ m] [monad m] (f : σ → σ) : m punit :=
-do s ← read, write (f s)
-
-instance (s m) [monad m] : monad_state s (state_t s m) :=
-{read := state_t.read, write := state_t.write'}
-
-instance monad_state_lift (s m m') [has_monad_lift m m'] [monad_state s m] [monad m] [monad m'] : monad_state s m' :=
-{read := monad_lift (read : m _),
- write := monad_lift ∘ (write : _ → m _)}
-
-class monad_error (ε : inout Type u) (m : Type v → Type w) :=
-[monad_m : monad m]
-(fail : Π {α : Type v}, ε → m α)
-
-@[inline] def fail {ε m α} [monad_error ε m] : ε → m α := monad_error.fail _
-
-instance (ε) : monad_error ε (except ε) :=
-{fail := @except.error _}
-
-instance monad_error_lift (ε m m') [has_monad_lift m m'] [monad_error ε m] [monad m] [monad m'] : monad_error ε m' :=
-{fail := λ _, monad_lift ∘ @fail _ m _ _}
-
-def unreachable {α m} [monad_error string m] : m α :=
-fail "unreachable"
-
-class monad_reader (r : inout Type u) (m : Type u → Type v) :=
-[monad_m : monad m]
-(ask : m r)
-
-@[inline] def ask {r m} [monad_reader r m] : m r := monad_reader.ask _ _
-
-instance (r m) [monad m] : monad_reader r (reader_t r m) :=
-{ask := reader_t.ask}
-
-instance monad_reader_lift (r m m') [has_monad_lift m m'] [monad_reader r m] [monad m] [monad m'] : monad_reader r m' :=
-{ask := monad_lift (ask : m _)}
+def unreachable {α m} [monad m] [monad_except string m] : m α :=
+throw "unreachable"

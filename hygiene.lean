@@ -25,8 +25,8 @@ protected def passert := except.passert ∘ parse_m.run' cfg st
 
 protected def passert' (x : parse_m r σ α) (p : σ → α → Prop) :=
 match parse_m.run cfg st x : _ → Prop with
-| except.ok ⟨a, st'⟩ := p st' a
-| except.error _    := true
+| (except.ok a, st')  := p st' a
+| (except.error _, _) := true
 end
 
 variables {cfg st}
@@ -51,14 +51,14 @@ variable (x : parse_m r σ α)
 @[simp] lemma passert'_with_state {σ'} (f : σ → σ') (p) (x : parse_m r σ' α) :
   parse_m.passert' cfg st (with_state f x) p = parse_m.passert' cfg (f st) x (λ _, p st) := sorry
 
+@[simp] lemma passert'_get (p) :
+  parse_m.passert' cfg st (get) p = p st st := sorry
+
+@[simp] lemma passert'_put (p st') :
+  parse_m.passert' cfg st (put st') p = p st' unit.star := sorry
+
 @[simp] lemma passert'_read (p) :
-  parse_m.passert' cfg st (read) p = p st st := sorry
-
-@[simp] lemma passert'_write (p st') :
-  parse_m.passert' cfg st (write st') p = p st' punit.star := sorry
-
-@[simp] lemma passert'_reader_t_read (p) :
-  parse_m.passert' cfg st (ask) p = p st cfg := sorry
+  parse_m.passert' cfg st (read) p = p st cfg := sorry
 
 lemma passert'_mp {p : parse_m r σ α} {s₀ : σ} {post₁ post₂ : σ → α → Prop} :
      parse_m.passert' cfg s₀ p post₁ → (∀ s a, post₁ s a → post₂ s a) → parse_m.passert' cfg s₀ p post₂ :=
@@ -118,8 +118,7 @@ begin
           apply parse_m.passert'_mp (ih st' st₂), intros st'' args' mmap_args',
           apply parse_m.passert'_mp expand_s', intros st''' s''' _,
           apply parse_m.passert'_mp_no_state mmap_args', intros args this,
-          -- TODO: use whnf_ginductive in injection
-          apply syntax.node.inj_arrow this, intro this, injection this,
+          injection this with this, injection this with this,
           simp *
         }
     end,
