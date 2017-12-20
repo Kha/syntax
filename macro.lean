@@ -14,12 +14,8 @@ instance (r σ) : monad (parse_m r σ) := by unfold parse_m; apply_instance
 instance (r σ) : monad_except string (parse_m r σ) := by dunfold parse_m; apply_instance
 instance (r σ) : monad_reader r (parse_m r σ) := by dunfold parse_m; apply_instance
 instance (r σ) : monad_state σ (parse_m r σ) := by dunfold parse_m; apply_instance
-
-def with_cfg {r r' σ α} (f : r → r') : parse_m r' σ α → parse_m r σ α :=
-map_except_t $ with_reader_t f
-
-def with_state {r σ σ' α} (f : σ → σ') : parse_m r σ' α → parse_m r σ α :=
-map_except_t $ map_reader_t $ with_state_t f
+instance (r σ σ') : monad_state_functor σ σ' _ (parse_m r σ) (parse_m r σ') := by dunfold parse_m; apply_instance
+instance (r r' σ) : monad_reader_functor r r' _ (parse_m r σ) (parse_m r' σ) := by dunfold parse_m; apply_instance
 
 def run {r σ α} (cfg : r) (st : σ): parse_m r σ α → except string α × σ :=
 state.run st ∘ reader_t.run cfg ∘ except_t.run
@@ -106,19 +102,19 @@ def resolve : scope → syntax → resolve_m' unit
 do cfg ← read,
    some {resolve := some res, ..} ← pure $ cfg.macros.find node.m
      | node.args.mmap' $ resolve sc,
-   arg_scopes ← parse_m.with_cfg parse_state.resolve_cfg $ res sc node,
+   arg_scopes ← with_reader parse_state.resolve_cfg $ res sc node,
    (arg_scopes.zip node.args).mmap' -- (uncurry resolve)
                                     (λ ⟨sc, stx⟩, resolve sc stx)
 | _ _ := pure ()
 using_well_founded { dec_tac := tactic.admit }
 
 def expand' (stx : syntax) : parse_m parse_state unit syntax :=
-parse_m.with_state (λ _, {expand_state . next_tag := 0}) (expand 1000 stx)
+with_state (λ _, {expand_state . next_tag := 0}) (expand 1000 stx)
 
 def resolve' (stx : syntax) : parse_m parse_state unit (syntax × resolve_state) :=
 let sc : scope := mk_rbmap _ _ _,
     st : resolve_state := ⟨mk_rbmap _ _ _⟩ in
-    parse_m.with_state (λ _, st) $
+    with_state (λ _, st) $
     do resolve sc stx,
        rsm ← get,
        pure (stx, rsm)

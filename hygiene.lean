@@ -55,7 +55,7 @@ variable (x : parse_m r σ α)
   parse_m.passert' cfg st (get) p = p st st := sorry
 
 @[simp] lemma passert'_put (p st') :
-  parse_m.passert' cfg st (put st') p = p st' unit.star := sorry
+  parse_m.passert' cfg st (put st') p = p st' punit.star := sorry
 
 @[simp] lemma passert'_read (p) :
   parse_m.passert' cfg st (read) p = p st cfg := sorry
