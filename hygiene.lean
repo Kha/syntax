@@ -18,50 +18,50 @@ protected def except.passert {ε} : except ε Prop → Prop
 | (except.ok p)    := p
 | (except.error _) := true
 
+@[simp] lemma except.passert_pure {ε p} : except.passert (pure p : except ε Prop) = p := rfl
+
 namespace parse_m
 variables {r σ α : Type} (cfg : r) (st : σ)
 
-protected def passert := except.passert ∘ parse_m.run' cfg st
-
-protected def passert' (x : parse_m r σ α) (p : σ → α → Prop) :=
-match parse_m.run cfg st x : _ → Prop with
-| (except.ok a, st')  := p st' a
-| (except.error _, _) := true
-end
-
-variables {cfg st}
-
-protected lemma passert_passert' (x : parse_m r σ Prop) :
-  parse_m.passert cfg st x = parse_m.passert' cfg st x (λ st a, a) := sorry
-
 variable (x : parse_m r σ α)
 
-@[simp] lemma passert'_pure (a : α) (p) : parse_m.passert' cfg st (pure a) p = p st a := sorry
+protected def run_cont {β} (x : parse_m r σ α) (cont : σ → α → except string β) : except string β :=
+match parse_m.run cfg st x with
+| (except.ok a, st)   := cont st a
+| (except.error e, _) := except.error e
+end
 
-@[simp] lemma passert'_bind {β}
-  (f : α → parse_m r σ β) (p : σ → β → Prop) :
-  parse_m.passert' cfg st (x >>= f) p =
-  parse_m.passert' cfg st x (λ st' a, parse_m.passert' cfg st' (f a) p) := sorry
+protected def passert (x : parse_m r σ Prop) : Prop :=
+except.passert $ parse_m.run_cont cfg st x $ λ st a, except.ok a
 
-@[simp] lemma passert'_fmap {β}
-  (f : α → β) (p : σ → β → Prop) :
-  parse_m.passert' cfg st (f <$> x) p =
-  parse_m.passert' cfg st x (λ st' a, p st' (f a)) := sorry
+variables {cfg} {st}
+variables {β γ : Type} (p : σ → β → except string γ)
+variables (q : σ → α → except string β)
 
-@[simp] lemma passert'_with_state {σ'} (f : σ → σ') (p) (x : parse_m r σ' α) :
-  parse_m.passert' cfg st (with_state f x) p = parse_m.passert' cfg (f st) x (λ _, p st) := sorry
+@[simp] lemma run_cont_pure (a : α) : parse_m.run_cont cfg st (pure a) q = q st a := sorry
 
-@[simp] lemma passert'_get (p) :
-  parse_m.passert' cfg st (get) p = p st st := sorry
+@[simp] lemma run_cont_bind (f : α → parse_m r σ β) :
+  parse_m.run_cont cfg st (x >>= f) p =
+  parse_m.run_cont cfg st x (λ st' a, parse_m.run_cont cfg st' (f a) p) := sorry
 
-@[simp] lemma passert'_put (p st') :
-  parse_m.passert' cfg st (put st') p = p st' punit.star := sorry
+@[simp] lemma run_cont_fmap (f : α → β) :
+  parse_m.run_cont cfg st (f <$> x) p =
+  parse_m.run_cont cfg st x (λ st' a, p st' (f a)) := sorry
 
-@[simp] lemma passert'_read (p) :
-  parse_m.passert' cfg st (read) p = p st cfg := sorry
+@[simp] lemma run_cont_with_state {σ'} (f : σ → σ') (x : parse_m r σ' α) :
+  parse_m.run_cont cfg st (with_state f x) q = parse_m.run_cont cfg (f st) x (λ _, q st) := sorry
 
-lemma passert'_mp {p : parse_m r σ α} {s₀ : σ} {post₁ post₂ : σ → α → Prop} :
-     parse_m.passert' cfg s₀ p post₁ → (∀ s a, post₁ s a → post₂ s a) → parse_m.passert' cfg s₀ p post₂ :=
+@[simp] lemma run_cont_get (p : σ → σ → except string γ) :
+  parse_m.run_cont cfg st get p = p st st := sorry
+
+@[simp] lemma run_cont_put (p : σ → punit → except string γ) (st') :
+  parse_m.run_cont cfg st (put st') p = p st' punit.star := sorry
+
+@[simp] lemma run_cont_read (p : σ → r → except string γ) :
+  parse_m.run_cont cfg st read p = p st cfg := sorry
+
+lemma passert_mp {p : parse_m r σ α} {s₀ : σ} {post₁ post₂ : σ → α → except string Prop} :
+  except.passert (parse_m.run_cont cfg s₀ p post₁) → (∀ s a, except.passert (post₁ s a) → except.passert (post₂ s a)) → except.passert (parse_m.run_cont cfg s₀ p post₂) :=
 sorry /-begin
   simp [passert],
   generalize h₁ : p s₀ = o,
@@ -71,8 +71,8 @@ sorry /-begin
     simp [passert], intros h₁ h₂, exact h₂ _ _ h₁ }
 end-/
 
-lemma passert'_mp_no_state {p : parse_m r σ α} {s₀ s₀' : σ} {post₁ post₂ : α → Prop} :
-     parse_m.passert' cfg s₀ p (λ s, post₁) → (∀ a, post₁ a → post₂ a) → parse_m.passert' cfg s₀' p (λ s, post₂) :=
+lemma passert_mp_no_state {p : parse_m r σ α} {s₀ s₀' : σ} {post₁ post₂ : α → except string Prop} :
+     (p.run_cont cfg s₀ (λ s, post₁)).passert → (∀ a, (post₁ a).passert → (post₂ a).passert) → (p.run_cont cfg s₀' (λ s, post₂)).passert :=
 sorry
 end parse_m
 
@@ -86,15 +86,16 @@ do s₁' ← expand' s₁,
 lemma expand_idem (s : syntax) (cfg : parse_state) :
 parse_m.passert cfg () $
 do s' ← expand' s,
-   s'' ← expand' s'
-     | pure true,
+   s'' ← expand' s',
    pure $ s'' = s' :=
 begin
   -- generalize states (irrelevant) and step counts
-  suffices : ∀ st st₂ steps steps₂, steps ≤ steps₂ → parse_m.passert' cfg st (expand steps s)
-    (λ (_x : expand_state) (a : syntax),
-       parse_m.passert' cfg st₂ (expand steps₂ a) (λ (_x : expand_state) (a_1 : syntax), a_1 = a)),
-  { simp [parse_m.passert_passert', expand'], apply this, apply le_refl },
+  suffices : ∀ st st₂ steps steps₂, steps ≤ steps₂ →
+(except.passert $
+ parse_m.run_cont cfg st (expand steps s) $ λ _ s',
+ parse_m.run_cont cfg st₂ (expand steps₂ s') $ λ _ s'',
+ pure $ s'' = s'),
+  { simp [parse_m.passert, expand'], apply this, apply le_refl },
   intros st st₂ steps steps₂,
   induction steps with steps generalizing s st st₂ steps₂,
   -- `expand s` out of steps: trivial
@@ -104,20 +105,20 @@ begin
     cases steps₂ with steps₂, { exfalso, apply nat.not_succ_le_zero _ hsteps₂ },
     -- recursive case 1: holds when expanding all children (when s is not a macro)
     have expand_mmap : ∀ (val : syntax_node syntax),
-      parse_m.passert' cfg st (mmap (expand steps) (val.args))
-        (λ (st' : expand_state) (a_1 : list syntax),
-          parse_m.passert' cfg st₂ (mmap (expand steps₂) a_1)
-            (λ (st' : expand_state) (a : list syntax),
-                syntax.node {id := val.id, sp := val.sp, m := val.m, args := a} =
-                  syntax.node {id := val.id, sp := val.sp, m := val.m, args := a_1})),
+      except.passert $
+      parse_m.run_cont cfg st (mmap (expand steps) (val.args)) $ λ _ args',
+      parse_m.run_cont cfg st₂ (mmap (expand steps₂) args') $ λ _ args'',
+      pure $ syntax.node {id := val.id, sp := val.sp, m := val.m, args := args''} =
+             syntax.node {id := val.id, sp := val.sp, m := val.m, args := args'},
     begin
         intro,
         induction val.args generalizing st st₂; simp [mmap],
         case list.cons {
-          apply parse_m.passert'_mp (steps_ih _ st st₂ _ (nat.le_of_succ_le_succ hsteps₂)), intros st' s' expand_s',
-          apply parse_m.passert'_mp (ih st' st₂), intros st'' args' mmap_args',
-          apply parse_m.passert'_mp expand_s', intros st''' s''' _,
-          apply parse_m.passert'_mp_no_state mmap_args', intros args this,
+          apply parse_m.passert_mp (steps_ih _ st st₂ _ (nat.le_of_succ_le_succ hsteps₂)), intros st' s' expand_s',
+          apply parse_m.passert_mp (ih st' st₂), intros st'' args' mmap_args',
+          apply parse_m.passert_mp expand_s', intros st''' s''' h,
+          apply parse_m.passert_mp_no_state mmap_args', intros args this,
+          simp at h this,
           injection this with this, injection this with this,
           simp *
         }
@@ -134,7 +135,7 @@ begin
           -- recursive case 1: re-expand the expansion of s. `expand s` will do one more step than `expand s'`.
           -- `mk_tag` is so simple that `simp` can automatically transform it to its spec
           simp [expand, mk_tag],
-          apply parse_m.passert'_mp (steps_ih _ _ st₂ _ (nat.le_of_succ_le hsteps₂)), intros st' s' expand_s',
+          apply parse_m.passert_mp (steps_ih _ _ st₂ _ (nat.le_of_succ_le hsteps₂)), intros st' s' expand_s',
           apply expand_s',
         },
       }
