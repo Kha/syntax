@@ -1,24 +1,24 @@
 import syntax
 
-open except
-open state
-
 attribute [instance] name.has_lt_quick option.has_lt
 
 @[irreducible] def parse_m (r σ) := except_t string $ reader_t r $ state σ
 
 namespace parse_m
+section
 local attribute [reducible] parse_m
 
-instance (r σ) : monad (parse_m r σ) := by unfold parse_m; apply_instance
-instance (r σ) : monad_except string (parse_m r σ) := by dunfold parse_m; apply_instance
-instance (r σ) : monad_reader r (parse_m r σ) := by dunfold parse_m; apply_instance
-instance (r σ) : monad_state σ (parse_m r σ) := by dunfold parse_m; apply_instance
-instance (r σ σ') : monad_state_functor σ σ' _ (parse_m r σ) (parse_m r σ') := by dunfold parse_m; apply_instance
-instance (r r' σ) : monad_reader_functor r r' _ (parse_m r σ) (parse_m r' σ) := by dunfold parse_m; apply_instance
+instance (r σ) : monad (parse_m r σ) := by apply_instance
+instance (r σ) : monad_run _ (parse_m r σ) := by apply_instance
+instance (r σ) : monad_except string (parse_m r σ) := by apply_instance
+instance (r σ) : monad_reader_lift r _ (parse_m r σ) := by apply_instance
+instance (r σ) : monad_state_lift σ _ (parse_m r σ) := by apply_instance
+instance (r σ σ') : monad_state_functor σ σ' _ (parse_m r σ) (parse_m r σ') := by apply_instance
+instance (r r' σ) : monad_reader_functor r r' _ (parse_m r σ) (parse_m r' σ) := by apply_instance
+end
 
-def run {r σ α} (cfg : r) (st : σ): parse_m r σ α → except string α × σ :=
-state.run st ∘ reader_t.run cfg ∘ except_t.run
+def run {r σ α} (cfg : r) (st : σ) (x : parse_m r σ α) :=
+(monad_run.run x : r → σ → except string α × σ) cfg st
 
 def run' {r σ α} (cfg : r) (st : σ): parse_m r σ α → except string α :=
 λ x, prod.fst $ parse_m.run cfg st x
@@ -109,12 +109,12 @@ do cfg ← read,
 using_well_founded { dec_tac := tactic.admit }
 
 def expand' (stx : syntax) : parse_m parse_state unit syntax :=
-with_state (λ _, {expand_state . next_tag := 0}) (expand 1000 stx)
+zoom (λ _, {expand_state . next_tag := 0}) (λ _, id) (expand 1000 stx)
 
 def resolve' (stx : syntax) : parse_m parse_state unit (syntax × resolve_state) :=
 let sc : scope := mk_rbmap _ _ _,
     st : resolve_state := ⟨mk_rbmap _ _ _⟩ in
-    with_state (λ _, st) $
+    zoom (λ _, st) (λ _, id) $
     do resolve sc stx,
        rsm ← get,
        pure (stx, rsm)

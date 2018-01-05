@@ -78,11 +78,5 @@ namespace monad
   infixr ` >=> `:55 := kleisli
 end monad
 
-protected def state_t.run {σ α : Type u} {m : Type u → Type v} [monad m] (st : σ) (x : state_t σ m α) : m (α × σ) :=
-x st
-
-protected def state.run {σ α : Type u} (st : σ) (x : state_t σ id α) : α × σ :=
-state_t.run st x
-
 def unreachable {α m} [monad m] [monad_except string m] : m α :=
 throw "unreachable"

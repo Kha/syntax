@@ -14,16 +14,24 @@ using_well_founded { dec_tac := tactic.admit }
 def α_equiv (rsm : resolve_map) (s₁ s₂ : syntax) :=
 ∃ σ, α_conv rsm σ s₁ = s₂
 
-protected def except.passert {ε} : except ε Prop → Prop
+@[simp] protected def except.passert {ε} : except ε Prop → Prop
 | (except.ok p)    := p
 | (except.error _) := true
 
 @[simp] lemma except.passert_pure {ε p} : except.passert (pure p : except ε Prop) = p := rfl
 
+section
+open interactive
+open interactive.types
+open tactic
+meta def tactic.interactive.simp_val (p : parse texpr) : tactic unit :=
+do e ← i_to_expr_strict p,
+   (e', _) ← conv.convert (conv.interactive.simp ff [] []) e,
+   exact e'
+end
+
 namespace parse_m
 variables {r σ α : Type} (cfg : r) (st : σ)
-
-variable (x : parse_m r σ α)
 
 protected def run_cont {β} (x : parse_m r σ α) (cont : σ → α → except string β) : except string β :=
 match parse_m.run cfg st x with
@@ -31,49 +39,75 @@ match parse_m.run cfg st x with
 | (except.error e, _) := except.error e
 end
 
+protected def passert_cont (x : parse_m r σ α) (cont : σ → α → Prop) : Prop :=
+except.passert $ parse_m.run_cont cfg st x $ λ st a, pure (cont st a)
+
 protected def passert (x : parse_m r σ Prop) : Prop :=
-except.passert $ parse_m.run_cont cfg st x $ λ st a, except.ok a
+parse_m.passert_cont cfg st x (λ st, id)
 
 variables {cfg} {st}
 variables {β γ : Type} (p : σ → β → except string γ)
 variables (q : σ → α → except string β)
 
-@[simp] lemma run_cont_pure (a : α) : parse_m.run_cont cfg st (pure a) q = q st a := sorry
+local attribute [simp] parse_m.run_cont parse_m.run
+attribute [reducible] parse_m
+attribute [reducible]
+  parse_m.monad_run except_t.monad_run state_t.monad_run reader_t.monad_run id.monad_run
 
+variable (x : parse_m r σ α)
+
+@[simp] lemma run_cont_pure (a : α) : parse_m.run_cont cfg st (pure a) q = q st a := rfl
+
+--set_option trace.simplify true
 @[simp] lemma run_cont_bind (f : α → parse_m r σ β) :
   parse_m.run_cont cfg st (x >>= f) p =
-  parse_m.run_cont cfg st x (λ st' a, parse_m.run_cont cfg st' (f a) p) := sorry
+  parse_m.run_cont cfg st x (λ st' a, parse_m.run_cont cfg st' (f a) p) :=
+by simp; cases (by simp_val parse_m.run cfg st x); cases fst; simp [except_t.bind_cont]
 
-@[simp] lemma run_cont_fmap (f : α → β) :
+@[simp] lemma run_cont_map (f : α → β) :
   parse_m.run_cont cfg st (f <$> x) p =
-  parse_m.run_cont cfg st x (λ st' a, p st' (f a)) := sorry
+  parse_m.run_cont cfg st x (λ st' a, p st' (f a)) :=
+by simp; cases (by simp_val parse_m.run cfg st x); cases fst; simp [except.map]
 
-@[simp] lemma run_cont_with_state {σ'} (f : σ → σ') (x : parse_m r σ' α) :
-  parse_m.run_cont cfg st (with_state f x) q = parse_m.run_cont cfg (f st) x (λ _, q st) := sorry
+@[simp] lemma run_cont_with_state {σ'} (f f') (x : parse_m r σ' α) :
+  parse_m.run_cont cfg st (zoom f f' x) q = parse_m.run_cont cfg (f st) x (λ st', q (f' st' st)) :=
+by simp [zoom]; cases (by simp_val parse_m.run cfg (f st) x); cases fst; simp
+
+attribute [reducible] parse_m.monad_state_lift
 
 @[simp] lemma run_cont_get (p : σ → σ → except string γ) :
-  parse_m.run_cont cfg st get p = p st st := sorry
+  parse_m.run_cont cfg st get p = p st st :=
+by simp [get]
 
 @[simp] lemma run_cont_put (p : σ → punit → except string γ) (st') :
-  parse_m.run_cont cfg st (put st') p = p st' punit.star := sorry
+  parse_m.run_cont cfg st (put st') p = p st' punit.star :=
+by simp [put]
 
 @[simp] lemma run_cont_read (p : σ → r → except string γ) :
-  parse_m.run_cont cfg st read p = p st cfg := sorry
+  parse_m.run_cont cfg st read p = p st cfg :=
+by simp [read]
+
+@[simp] lemma run_cont_throw (e) (p : σ → α → except string γ) :
+  parse_m.run_cont cfg st (throw e) p = except.error e :=
+rfl
 
 lemma passert_mp {p : parse_m r σ α} {s₀ : σ} {post₁ post₂ : σ → α → except string Prop} :
   except.passert (parse_m.run_cont cfg s₀ p post₁) → (∀ s a, except.passert (post₁ s a) → except.passert (post₂ s a)) → except.passert (parse_m.run_cont cfg s₀ p post₂) :=
-sorry /-begin
-  simp [passert],
-  generalize h₁ : p s₀ = o,
-  cases o with r,
-  { simp [passert] },
-  { cases r with a s,
-    simp [passert], intros h₁ h₂, exact h₂ _ _ h₁ }
-end-/
+begin
+  simp,
+  intros hpost₁ hmp,
+  cases (by simp_val parse_m.run cfg s₀ p); cases fst; simp [parse_m.run_cont] at *,
+  apply hmp _ _ hpost₁
+end
 
-lemma passert_mp_no_state {p : parse_m r σ α} {s₀ s₀' : σ} {post₁ post₂ : α → except string Prop} :
-     (p.run_cont cfg s₀ (λ s, post₁)).passert → (∀ a, (post₁ a).passert → (post₂ a).passert) → (p.run_cont cfg s₀' (λ s, post₂)).passert :=
-sorry
+@[simp] lemma passert_invariant {p : parse_m r σ α} {s₀ : σ} {post : except string Prop} :
+  except.passert post → except.passert (parse_m.run_cont cfg s₀ p (λ _ _, post)) :=
+begin
+  simp,
+  cases (by simp_val parse_m.run cfg s₀ p); cases fst; simp [parse_m.run_cont] at *,
+  exact id
+end
+
 end parse_m
 
 theorem hygienic (s₁ s₂ : syntax) (st : parse_state) :
@@ -90,14 +124,16 @@ do s' ← expand' s,
    pure $ s'' = s' :=
 begin
   -- generalize states (irrelevant) and step counts
-  suffices : ∀ st st₂ steps steps₂, steps ≤ steps₂ →
-(except.passert $
- parse_m.run_cont cfg st (expand steps s) $ λ _ s',
- parse_m.run_cont cfg st₂ (expand steps₂ s') $ λ _ s'',
- pure $ s'' = s'),
-  { simp [parse_m.passert, expand'], apply this, apply le_refl },
-  intros st st₂ steps steps₂,
-  induction steps with steps generalizing s st st₂ steps₂,
+  suffices : ∀ st steps steps₂, steps ≤ steps₂ →
+(parse_m.passert_cont cfg st (expand steps s) $ λ _ s',
+ ∀ st₂, parse_m.passert_cont cfg st₂ (expand steps₂ s') $ λ _ s'',
+ s'' = s'),
+  { simp [parse_m.passert, parse_m.passert_cont, expand'] at *,
+    apply parse_m.passert_mp, apply this, apply le_refl,
+    intros st' s' x, apply x },
+  simp [parse_m.passert_cont],
+  intros st steps steps₂,
+  induction steps with steps generalizing s st steps₂,
   -- `expand s` out of steps: trivial
   { intros; simp [expand] },
   { intro hsteps₂,
@@ -105,22 +141,21 @@ begin
     cases steps₂ with steps₂, { exfalso, apply nat.not_succ_le_zero _ hsteps₂ },
     -- recursive case 1: holds when expanding all children (when s is not a macro)
     have expand_mmap : ∀ (val : syntax_node syntax),
-      except.passert $
-      parse_m.run_cont cfg st (mmap (expand steps) (val.args)) $ λ _ args',
-      parse_m.run_cont cfg st₂ (mmap (expand steps₂) args') $ λ _ args'',
-      pure $ syntax.node {id := val.id, sp := val.sp, m := val.m, args := args''} =
-             syntax.node {id := val.id, sp := val.sp, m := val.m, args := args'},
+      parse_m.passert_cont cfg st (mmap (expand steps) (val.args)) $ λ _ args',
+      ∀ st₂, parse_m.passert_cont cfg st₂ (mmap (expand steps₂) args') $ λ _ args'',
+        args'' = args',
     begin
         intro,
-        induction val.args generalizing st st₂; simp [mmap],
+        simp [parse_m.passert_cont] at *,
+        induction val.args generalizing st; simp [mmap],
         case list.cons {
-          apply parse_m.passert_mp (steps_ih _ st st₂ _ (nat.le_of_succ_le_succ hsteps₂)), intros st' s' expand_s',
-          apply parse_m.passert_mp (ih st' st₂), intros st'' args' mmap_args',
-          apply parse_m.passert_mp expand_s', intros st''' s''' h,
-          apply parse_m.passert_mp_no_state mmap_args', intros args this,
-          simp at h this,
-          injection this with this, injection this with this,
-          simp *
+          apply parse_m.passert_mp (steps_ih _ st _ (nat.le_of_succ_le_succ hsteps₂)), intros st' s' expand_s',
+          clear steps_ih,
+          apply parse_m.passert_mp (ih st'), intros st'' args' mmap_args' st₂,
+          clear ih,
+          apply parse_m.passert_mp (expand_s' _), intros st''' s''' h,
+          apply parse_m.passert_mp (mmap_args' _), intros st'''' args this,
+          simp * at *,
         }
     end,
     cases hs : s; simp [expand],
@@ -135,7 +170,7 @@ begin
           -- recursive case 1: re-expand the expansion of s. `expand s` will do one more step than `expand s'`.
           -- `mk_tag` is so simple that `simp` can automatically transform it to its spec
           simp [expand, mk_tag],
-          apply parse_m.passert_mp (steps_ih _ _ st₂ _ (nat.le_of_succ_le hsteps₂)), intros st' s' expand_s',
+          apply parse_m.passert_mp (steps_ih _ _ _ (nat.le_of_succ_le hsteps₂)), intros st' s' expand_s',
           apply expand_s',
         },
       }
