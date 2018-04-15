@@ -58,7 +58,6 @@ variable (x : parse_m r σ α)
 
 @[simp] lemma run_cont_pure (a : α) : parse_m.run_cont cfg st (pure a) q = q st a := rfl
 
---set_option trace.simplify true
 @[simp] lemma run_cont_bind (f : α → parse_m r σ β) :
   parse_m.run_cont cfg st (x >>= f) p =
   parse_m.run_cont cfg st x (λ st' a, parse_m.run_cont cfg st' (f a) p) :=
@@ -69,19 +68,14 @@ by simp; cases (by simp_val parse_m.run cfg st x); cases fst; simp [except_t.bin
   parse_m.run_cont cfg st x (λ st' a, p st' (f a)) :=
 by simp; cases (by simp_val parse_m.run cfg st x); cases fst; simp [except.map]
 
-@[simp] lemma run_cont_with_state {σ'} (f f') (x : parse_m r σ' α) :
-  parse_m.run_cont cfg st (zoom f f' x) q = parse_m.run_cont cfg (f st) x (λ st', q (f' st' st)) :=
-by simp [zoom]; cases (by simp_val parse_m.run cfg (f st) x); cases fst; simp
-
-attribute [reducible] parse_m.monad_state_lift
-
-@[simp] lemma run_cont_get (p : σ → σ → except string γ) :
-  parse_m.run_cont cfg st get p = p st st :=
-by simp [get]
+@[simp] lemma run_cont_adapt_state {σ' σ''} (f : σ → σ' × σ'') (f') (x : parse_m r σ' α) :
+  parse_m.run_cont cfg st (adapt_state f f' x) q =
+    let (st',st'') := f st in parse_m.run_cont cfg st' x (λ st', q (f' st' st'')) :=
+by cases h : f st with st' st''; simp [adapt_state]; rw [h]; simp; cases (by simp_val parse_m.run cfg st' x); cases fst; simp
 
 @[simp] lemma run_cont_put (p : σ → punit → except string γ) (st') :
   parse_m.run_cont cfg st (put st') p = p st' punit.star :=
-by simp [put]
+by simp [put, monad_state.lift]
 
 @[simp] lemma run_cont_read (p : σ → r → except string γ) :
   parse_m.run_cont cfg st read p = p st cfg :=
@@ -89,7 +83,7 @@ by simp [read]
 
 @[simp] lemma run_cont_throw (e) (p : σ → α → except string γ) :
   parse_m.run_cont cfg st (throw e) p = except.error e :=
-rfl
+by simp [throw]
 
 lemma passert_mp {p : parse_m r σ α} {s₀ : σ} {post₁ post₂ : σ → α → except string Prop} :
   except.passert (parse_m.run_cont cfg s₀ p post₁) → (∀ s a, except.passert (post₁ s a) → except.passert (post₂ s a)) → except.passert (parse_m.run_cont cfg s₀ p post₂) :=

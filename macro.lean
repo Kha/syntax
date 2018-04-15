@@ -11,14 +11,14 @@ local attribute [reducible] parse_m
 instance (r σ) : monad (parse_m r σ) := by apply_instance
 instance (r σ) : monad_run _ (parse_m r σ) := by apply_instance
 instance (r σ) : monad_except string (parse_m r σ) := by apply_instance
-instance (r σ) : monad_reader_lift r _ (parse_m r σ) := by apply_instance
-instance (r σ) : monad_state_lift σ _ (parse_m r σ) := by apply_instance
-instance (r σ σ') : monad_state_functor σ σ' _ (parse_m r σ) (parse_m r σ') := by apply_instance
-instance (r r' σ) : monad_reader_functor r r' _ (parse_m r σ) (parse_m r' σ) := by apply_instance
+instance (r σ) : monad_reader r (parse_m r σ) := by apply_instance
+instance (r σ) : monad_state σ (parse_m r σ) := by apply_instance
+instance (r σ σ') : monad_state_adapter σ σ' (parse_m r σ) (parse_m r σ') := by apply_instance
+instance (r r' σ) : monad_reader_adapter r r' (parse_m r σ) (parse_m r' σ) := by apply_instance
 end
 
 def run {r σ α} (cfg : r) (st : σ) (x : parse_m r σ α) :=
-(monad_run.run x : r → σ → except string α × σ) cfg st
+let r := monad_run.run x in r cfg st
 
 def run' {r σ α} (cfg : r) (st : σ): parse_m r σ α → except string α :=
 λ x, prod.fst $ parse_m.run cfg st x
@@ -102,19 +102,19 @@ def resolve : scope → syntax → resolve_m' unit
 do cfg ← read,
    some {resolve := some res, ..} ← pure $ cfg.macros.find node.m
      | node.args.mmap' $ resolve sc,
-   arg_scopes ← with_reader parse_state.resolve_cfg $ res sc node,
+   arg_scopes ← adapt_reader parse_state.resolve_cfg $ res sc node,
    (arg_scopes.zip node.args).mmap' -- (uncurry resolve)
                                     (λ ⟨sc, stx⟩, resolve sc stx)
 | _ _ := pure ()
 using_well_founded { dec_tac := tactic.admit }
 
 def expand' (stx : syntax) : parse_m parse_state unit syntax :=
-zoom (λ _, {expand_state . next_tag := 0}) (λ _, id) (expand 1000 stx)
+adapt_state (λ _, ({expand_state . next_tag := 0}, ())) (λ _, id) (expand 1000 stx)
 
 def resolve' (stx : syntax) : parse_m parse_state unit (syntax × resolve_state) :=
 let sc : scope := mk_rbmap _ _ _,
     st : resolve_state := ⟨mk_rbmap _ _ _⟩ in
-    zoom (λ _, st) (λ _, id) $
+    adapt_state (λ _, (st, ())) (λ _, id) $
     do resolve sc stx,
        rsm ← get,
        pure (stx, rsm)

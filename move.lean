@@ -25,7 +25,9 @@ namespace name
     case anonymous {
       by_cases n' = anonymous; simp *; apply_instance
     },
-    all_goals { cases n'; simp; apply_instance }
+    all_goals { cases n'; {
+      tactic.unfreeze_local_instances, -- use recursive instance
+      simp; apply_instance } }
   end
 
   protected def has_lt_quick : has_lt name := ⟨name.quick_lt⟩
